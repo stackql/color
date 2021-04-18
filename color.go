@@ -37,6 +37,50 @@ var (
 type Color struct {
 	params  []Attribute
 	noColor *bool
+	stack   *ColorStack
+}
+
+type ColorStack struct {
+	stack []*Color
+}
+
+func (cs *ColorStack) Push(color *Color) {
+	cs.stack = append(cs.stack, color)
+}
+
+func (cs *ColorStack) Pop() (*Color, error) {
+	var color *Color
+	if len(cs.stack) < 1 {
+		return nil, fmt.Errorf("stack empty")
+	}
+	color, cs.stack = cs.stack[len(cs.stack)-1], cs.stack[:len(cs.stack)-1]
+	return color, nil
+}
+
+func (cs *ColorStack) Peek() *Color {
+	if len(cs.stack) > 0 {
+		return cs.stack[len(cs.stack)-1]
+	}
+	return nil
+}
+
+func (cs *ColorStack) SeekBelow(idx int) *Color {
+	if len(cs.stack) > 0 && len(cs.stack) >= idx+1 {
+		return cs.stack[len(cs.stack)-(idx+1)]
+	}
+	return nil
+}
+
+func (cs *ColorStack) NewColor(value ...Attribute) {
+	c := &Color{params: make([]Attribute, 0), stack: cs}
+	c.Add(value...)
+	cs.Push(c)
+}
+
+func InitColorStack() *ColorStack {
+	return &ColorStack{
+		stack: make([]*Color, 0),
+	}
 }
 
 // Attribute defines a single SGR Code
@@ -263,7 +307,10 @@ func (c *Color) Sprintln(a ...interface{}) string {
 
 // Sprintf is just like Printf, but returns a string instead of printing it.
 func (c *Color) Sprintf(format string, a ...interface{}) string {
-	return c.wrap(fmt.Sprintf(format, a...))
+	if a != nil {
+		return c.wrap(fmt.Sprintf(format, a...))
+	}
+	return c.wrap(format)
 }
 
 // FprintFunc returns a new function that prints the passed arguments as
@@ -326,6 +373,12 @@ func (c *Color) SprintFunc() func(a ...interface{}) string {
 	}
 }
 
+func (c *Color) SprintFuncDecrement() func(a ...interface{}) string {
+	return func(a ...interface{}) string {
+		return c.wrap(fmt.Sprint(a...))
+	}
+}
+
 // SprintfFunc returns a new function that returns colorized strings for the
 // given arguments with fmt.Sprintf(). Useful to put into or mix into other
 // string. Windows users should use this in conjunction with color.Output.
@@ -370,6 +423,16 @@ func (c *Color) format() string {
 }
 
 func (c *Color) unformat() string {
+	if c.stack != nil {
+		color := c.stack.Peek()
+		if color != c {
+			return fmt.Sprintf("%s[%dm", escape, Reset)
+		}
+		prevColor := c.stack.SeekBelow(1)
+		if prevColor != nil {
+			return fmt.Sprintf("%s[%sm", escape, prevColor.sequence())
+		}
+	}
 	return fmt.Sprintf("%s[%dm", escape, Reset)
 }
 
